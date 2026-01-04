@@ -15,32 +15,54 @@ SCHEDULE_TEXT = (BASE_DIR / "agpl_2026_schedule.txt").read_text(encoding="utf-8"
 TEAMS_TEXT = (BASE_DIR / "cricket_teams.txt").read_text(encoding="utf-8", errors="ignore")
 
 # ==================================================
-# ROBUST SECTION EXTRACTOR ✅ (FIXED)
+# BRACKET SECTION EXTRACTOR (ABOUT FILE)
 # ==================================================
-def extract_section(text, section_name):
-    section_name = section_name.strip().lower()
+def extract_bracket_section(text, section):
+    section = section.lower().strip()
     lines = text.splitlines()
-
     collecting = False
     result = []
 
     for line in lines:
         clean = line.strip().lower()
 
-        # start section (flexible match)
         if clean.startswith("[") and clean.endswith("]"):
             header = clean.strip("[]").strip()
-            if header == section_name:
+            if header == section:
                 collecting = True
                 continue
             elif collecting:
-                break  # next section reached
+                break
 
         if collecting:
             result.append(line)
 
     output = "\n".join(result).strip()
     return output if output else "No information available for this topic."
+
+# ==================================================
+# DAY SCHEDULE EXTRACTOR (SCHEDULE FILE)
+# ==================================================
+def extract_day_schedule(text, day_number):
+    pattern = re.compile(rf"DAY {day_number}\b", re.IGNORECASE)
+    lines = text.splitlines()
+
+    collecting = False
+    result = []
+
+    for line in lines:
+        if pattern.search(line):
+            collecting = True
+            result.append(line)
+            continue
+
+        if collecting:
+            if re.search(r"DAY \d+\b", line, re.IGNORECASE):
+                break
+            result.append(line)
+
+    output = "\n".join(result).strip()
+    return output if output else "No schedule found for this day."
 
 # ==================================================
 # TEAM → PLAYER PARSER
@@ -71,14 +93,14 @@ def process_user_message(msg):
     msg = msg.lower()
     msg = re.sub(r"[^\w\s-]", "", msg)
 
-    # ---------- GREETINGS ----------
+    # ---------- GREETING ----------
     if msg in ["hi", "hello", "hey", "good morning", "good evening"]:
         return (
             "Hello 👋\n\n"
             "Welcome to AGPL–2026 WhatsApp Assistant 🏏\n\n"
             "You can ask:\n"
             "• About AGPL\n"
-            "• Purpose of tournament\n"
+            "• Purpose\n"
             "• Rules / format\n"
             "• Points system\n"
             "• Day 2 matches\n"
@@ -86,44 +108,31 @@ def process_user_message(msg):
             "• Player name"
         )
 
-    # ---------- ABOUT / RULES / POINTS (FIXED ✅) ----------
+    # ---------- ABOUT FILE ----------
     if "about" in msg:
-        return extract_section(ABOUT_TEXT, "about")
+        return extract_bracket_section(ABOUT_TEXT, "about")
 
     if "purpose" in msg:
-        return extract_section(ABOUT_TEXT, "purpose")
+        return extract_bracket_section(ABOUT_TEXT, "purpose")
 
     if "rule" in msg or "format" in msg:
-        return extract_section(ABOUT_TEXT, "format")
+        return extract_bracket_section(ABOUT_TEXT, "format")
 
     if "point" in msg:
-        return extract_section(ABOUT_TEXT, "points")
+        return extract_bracket_section(ABOUT_TEXT, "points")
 
     if "date" in msg:
-        return extract_section(ABOUT_TEXT, "dates")
+        return extract_bracket_section(ABOUT_TEXT, "dates")
 
     if "team" in msg and "player" not in msg:
-        return extract_section(ABOUT_TEXT, "teams")
+        return extract_bracket_section(ABOUT_TEXT, "teams")
 
-    # ---------- DAY MATCHES ----------
+    # ---------- DAY MATCHES (FIXED ✅) ----------
     day_match = re.search(r"day\s*[-]?\s*(\d)", msg)
     if day_match:
-        return extract_section(SCHEDULE_TEXT, f"day {day_match.group(1)}")
+        return extract_day_schedule(SCHEDULE_TEXT, day_match.group(1))
 
-    # ---------- OTHER SCHEDULE ----------
-    if "final" in msg:
-        return extract_section(SCHEDULE_TEXT, "final match")
-
-    if "timing" in msg:
-        return extract_section(SCHEDULE_TEXT, "daily match timings")
-
-    if "bowling" in msg and "15" in msg:
-        return extract_section(SCHEDULE_TEXT, "for 15 over match")
-
-    if "bowling" in msg and "20" in msg:
-        return extract_section(SCHEDULE_TEXT, "for 20 over match")
-
-    # ---------- ALL PLAYERS ----------
+    # ---------- PLAYERS ----------
     if "all players" in msg or "players list" in msg:
         output = ["🏏 AGPL Team Players\n"]
         for team, players in TEAM_PLAYERS.items():
@@ -133,7 +142,6 @@ def process_user_message(msg):
             output.append("")
         return "\n".join(output).strip()
 
-    # ---------- TEAM PLAYERS ----------
     for team, players in TEAM_PLAYERS.items():
         if team.lower() in msg:
             return "\n".join(
@@ -141,7 +149,6 @@ def process_user_message(msg):
                 [f"• {p}" for p in players]
             )
 
-    # ---------- FALLBACK ----------
     return (
         "Sorry, I couldn’t understand your request ❌\n\n"
         "Try asking:\n"
@@ -153,7 +160,7 @@ def process_user_message(msg):
     )
 
 # ==================================================
-# WHATSAPP WEBHOOK (SAFE & FIXED)
+# WHATSAPP WEBHOOK (STABLE)
 # ==================================================
 @app.post("/whatsapp")
 @app.post("/whatsapp/")
@@ -162,9 +169,6 @@ async def whatsapp_webhook(request: Request):
     incoming_msg = form.get("Body", "")
 
     reply_text = process_user_message(incoming_msg)
-
-    if not reply_text.strip():
-        reply_text = "Sorry, something went wrong. Please try again."
 
     resp = MessagingResponse()
     resp.message(reply_text)
@@ -179,4 +183,4 @@ async def whatsapp_webhook(request: Request):
 # ==================================================
 @app.get("/")
 def health():
-    return {"status": "AGPL WhatsApp Bot is running"}
+    return {"status": "AG
