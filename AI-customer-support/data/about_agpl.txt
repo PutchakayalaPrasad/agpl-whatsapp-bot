@@ -1,0 +1,29 @@
+{
+  "ABOUT": "AGPL–2026 is a village-level tennis ball cricket tournament organized to promote sportsmanship, unity, and healthy competition among local youth.",
+
+  "PURPOSE": [
+    "Encourage cricket talent in the village",
+    "Promote teamwork and discipline",
+    "Build leadership among youth",
+    "Bring the community together"
+  ],
+
+  "FORMAT": {
+    "type": "Round Robin League",
+    "league_overs": 15,
+    "final_overs": 20
+  },
+
+  "DATES": {
+    "start": "12 January 2026",
+    "end": "15 January 2026"
+  },
+
+  "TEAMS": ["East", "West", "North", "South", "Palem"],
+
+  "POINTS": {
+    "win": 2,
+    "loss": 0,
+    "tie": 1
+  }
+}
