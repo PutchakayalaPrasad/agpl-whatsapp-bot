@@ -10,9 +10,15 @@ app = FastAPI(title="AGPL WhatsApp Assistant")
 # ==================================================
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-ABOUT_TEXT = (BASE_DIR / "about_agpl.txt").read_text(encoding="utf-8", errors="ignore")
-SCHEDULE_TEXT = (BASE_DIR / "agpl_2026_schedule.txt").read_text(encoding="utf-8", errors="ignore")
-TEAMS_TEXT = (BASE_DIR / "cricket_teams.txt").read_text(encoding="utf-8", errors="ignore")
+ABOUT_TEXT = (BASE_DIR / "about_agpl.txt").read_text(
+    encoding="utf-8", errors="ignore"
+)
+SCHEDULE_TEXT = (BASE_DIR / "agpl_2026_schedule.txt").read_text(
+    encoding="utf-8", errors="ignore"
+)
+TEAMS_TEXT = (BASE_DIR / "cricket_teams.txt").read_text(
+    encoding="utf-8", errors="ignore"
+)
 
 # ==================================================
 # BRACKET SECTION EXTRACTOR (ABOUT FILE)
@@ -20,6 +26,7 @@ TEAMS_TEXT = (BASE_DIR / "cricket_teams.txt").read_text(encoding="utf-8", errors
 def extract_bracket_section(text, section):
     section = section.lower().strip()
     lines = text.splitlines()
+
     collecting = False
     result = []
 
@@ -44,20 +51,20 @@ def extract_bracket_section(text, section):
 # DAY SCHEDULE EXTRACTOR (SCHEDULE FILE)
 # ==================================================
 def extract_day_schedule(text, day_number):
-    pattern = re.compile(rf"DAY {day_number}\b", re.IGNORECASE)
+    day_pattern = re.compile(rf"DAY\s+{day_number}\b", re.IGNORECASE)
     lines = text.splitlines()
 
     collecting = False
     result = []
 
     for line in lines:
-        if pattern.search(line):
+        if day_pattern.search(line):
             collecting = True
             result.append(line)
             continue
 
         if collecting:
-            if re.search(r"DAY \d+\b", line, re.IGNORECASE):
+            if re.search(r"DAY\s+\d+\b", line, re.IGNORECASE):
                 break
             result.append(line)
 
@@ -127,7 +134,7 @@ def process_user_message(msg):
     if "team" in msg and "player" not in msg:
         return extract_bracket_section(ABOUT_TEXT, "teams")
 
-    # ---------- DAY MATCHES (FIXED ✅) ----------
+    # ---------- DAY MATCHES ----------
     day_match = re.search(r"day\s*[-]?\s*(\d)", msg)
     if day_match:
         return extract_day_schedule(SCHEDULE_TEXT, day_match.group(1))
@@ -145,8 +152,8 @@ def process_user_message(msg):
     for team, players in TEAM_PLAYERS.items():
         if team.lower() in msg:
             return "\n".join(
-                [f"🏏 {team} Team Players"] +
-                [f"• {p}" for p in players]
+                [f"🏏 {team} Team Players"]
+                + [f"• {p}" for p in players]
             )
 
     return (
@@ -160,7 +167,7 @@ def process_user_message(msg):
     )
 
 # ==================================================
-# WHATSAPP WEBHOOK (STABLE)
+# WHATSAPP WEBHOOK
 # ==================================================
 @app.post("/whatsapp")
 @app.post("/whatsapp/")
@@ -169,6 +176,9 @@ async def whatsapp_webhook(request: Request):
     incoming_msg = form.get("Body", "")
 
     reply_text = process_user_message(incoming_msg)
+
+    if not reply_text.strip():
+        reply_text = "Sorry, something went wrong. Please try again."
 
     resp = MessagingResponse()
     resp.message(reply_text)
@@ -183,4 +193,4 @@ async def whatsapp_webhook(request: Request):
 # ==================================================
 @app.get("/")
 def health():
-    return {"status": "AG
+    return {"status": "AGPL WhatsApp Bot is running"}
