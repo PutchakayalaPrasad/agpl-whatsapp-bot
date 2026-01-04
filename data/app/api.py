@@ -10,66 +10,28 @@ app = FastAPI(title="AGPL WhatsApp Assistant")
 # ==================================================
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-ABOUT_TEXT = (BASE_DIR / "about_agpl.txt").read_text(
-    encoding="utf-8", errors="ignore"
-)
-SCHEDULE_TEXT = (BASE_DIR / "agpl_2026_schedule.txt").read_text(
-    encoding="utf-8", errors="ignore"
-)
-TEAMS_TEXT = (BASE_DIR / "cricket_teams.txt").read_text(
-    encoding="utf-8", errors="ignore"
-)
+ABOUT_TEXT = (BASE_DIR / "about_agpl.txt").read_text(encoding="utf-8")
+SCHEDULE_TEXT = (BASE_DIR / "agpl_2026_schedule.txt").read_text(encoding="utf-8")
+TEAMS_TEXT = (BASE_DIR / "cricket_teams.txt").read_text(encoding="utf-8")
 
 # ==================================================
-# BRACKET SECTION EXTRACTOR (ABOUT FILE)
+# GENERIC SECTION EXTRACTOR
 # ==================================================
-def extract_bracket_section(text, section):
-    section = section.lower().strip()
+def extract_section(text, section):
     lines = text.splitlines()
-
-    collecting = False
     result = []
+    capture = False
 
     for line in lines:
-        clean = line.strip().lower()
-
-        if clean.startswith("[") and clean.endswith("]"):
-            header = clean.strip("[]").strip()
-            if header == section:
-                collecting = True
-                continue
-            elif collecting:
-                break
-
-        if collecting:
-            result.append(line)
-
-    output = "\n".join(result).strip()
-    return output if output else "No information available for this topic."
-
-# ==================================================
-# DAY SCHEDULE EXTRACTOR (SCHEDULE FILE)
-# ==================================================
-def extract_day_schedule(text, day_number):
-    day_pattern = re.compile(rf"DAY\s+{day_number}\b", re.IGNORECASE)
-    lines = text.splitlines()
-
-    collecting = False
-    result = []
-
-    for line in lines:
-        if day_pattern.search(line):
-            collecting = True
-            result.append(line)
+        if line.strip() == f"[{section}]":
+            capture = True
             continue
-
-        if collecting:
-            if re.search(r"DAY\s+\d+\b", line, re.IGNORECASE):
-                break
+        if capture and line.startswith("[") and line.endswith("]"):
+            break
+        if capture:
             result.append(line)
 
-    output = "\n".join(result).strip()
-    return output if output else "No schedule found for this day."
+    return "\n".join(result).strip()
 
 # ==================================================
 # TEAM → PLAYER PARSER
@@ -84,7 +46,7 @@ def load_team_players(text):
             continue
 
         if line.startswith("[") and line.endswith("]"):
-            current_team = line.strip("[]").strip()
+            current_team = line[1:-1]
             teams[current_team] = []
         elif current_team:
             teams[current_team].append(line)
@@ -97,49 +59,64 @@ TEAM_PLAYERS = load_team_players(TEAMS_TEXT)
 # MESSAGE PROCESSOR
 # ==================================================
 def process_user_message(msg):
-    msg = msg.lower()
-    msg = re.sub(r"[^\w\s-]", "", msg)
+    msg = msg.lower().strip()
 
-    # ---------- GREETING ----------
+    # ---------- GREETINGS ----------
     if msg in ["hi", "hello", "hey", "good morning", "good evening"]:
         return (
             "Hello 👋\n\n"
             "Welcome to AGPL–2026 WhatsApp Assistant 🏏\n\n"
             "You can ask:\n"
             "• About AGPL\n"
-            "• Purpose\n"
-            "• Rules / format\n"
+            "• Tournament format\n"
             "• Points system\n"
             "• Day 2 matches\n"
-            "• Team players\n"
+            "• East team players\n"
             "• Player name"
         )
 
-    # ---------- ABOUT FILE ----------
+    # ---------- ABOUT ----------
     if "about" in msg:
-        return extract_bracket_section(ABOUT_TEXT, "about")
+        return extract_section(ABOUT_TEXT, "ABOUT")
 
     if "purpose" in msg:
-        return extract_bracket_section(ABOUT_TEXT, "purpose")
+        return extract_section(ABOUT_TEXT, "PURPOSE")
 
-    if "rule" in msg or "format" in msg:
-        return extract_bracket_section(ABOUT_TEXT, "format")
-
-    if "point" in msg:
-        return extract_bracket_section(ABOUT_TEXT, "points")
+    if "format" in msg or "rules" in msg:
+        return extract_section(ABOUT_TEXT, "FORMAT")
 
     if "date" in msg:
-        return extract_bracket_section(ABOUT_TEXT, "dates")
+        return extract_section(ABOUT_TEXT, "DATES")
 
-    if "team" in msg and "player" not in msg:
-        return extract_bracket_section(ABOUT_TEXT, "teams")
+    if "points" in msg:
+        return extract_section(ABOUT_TEXT, "POINTS")
 
-    # ---------- DAY MATCHES ----------
+    if "teams" in msg:
+        return extract_section(ABOUT_TEXT, "TEAMS")
+
+    # ---------- DAY MATCHES (SMART FIX ✅) ----------
     day_match = re.search(r"day\s*[-]?\s*(\d)", msg)
     if day_match:
-        return extract_day_schedule(SCHEDULE_TEXT, day_match.group(1))
+        day_number = day_match.group(1)
+        section_name = f"DAY_{day_number}"
+        result = extract_section(SCHEDULE_TEXT, section_name)
+        if result:
+            return result
 
-    # ---------- PLAYERS ----------
+    # ---------- OTHER SCHEDULE ----------
+    if "final" in msg:
+        return extract_section(SCHEDULE_TEXT, "FINAL")
+
+    if "timing" in msg:
+        return extract_section(SCHEDULE_TEXT, "TIMINGS")
+
+    if "bowling" in msg and "15" in msg:
+        return extract_section(SCHEDULE_TEXT, "BOWLING_15_OVERS")
+
+    if "bowling" in msg and "20" in msg:
+        return extract_section(SCHEDULE_TEXT, "BOWLING_20_OVERS")
+
+    # ---------- ALL PLAYERS ----------
     if "all players" in msg or "players list" in msg:
         output = ["🏏 AGPL Team Players\n"]
         for team, players in TEAM_PLAYERS.items():
@@ -149,48 +126,46 @@ def process_user_message(msg):
             output.append("")
         return "\n".join(output).strip()
 
+    # ---------- PLAYER SEARCH ----------
+    for team, players in TEAM_PLAYERS.items():
+        for player in players:
+            if player.lower() == msg:
+                return f"🏏 Player Details\n\nName: {player}\nTeam: {team}"
+
+    # ---------- TEAM PLAYERS ----------
     for team, players in TEAM_PLAYERS.items():
         if team.lower() in msg:
             return "\n".join(
-                [f"🏏 {team} Team Players"]
-                + [f"• {p}" for p in players]
+                [f"🏏 {team} Team Players"] +
+                [f"• {p}" for p in players]
             )
 
+    # ---------- FALLBACK ----------
     return (
         "Sorry, I couldn’t understand your request ❌\n\n"
         "Try asking:\n"
         "• About AGPL\n"
-        "• Purpose\n"
-        "• Rules\n"
-        "• Points\n"
-        "• Day 2 matches"
+        "• Day 2 matches\n"
+        "• West team players\n"
+        "• Player name"
     )
 
 # ==================================================
 # WHATSAPP WEBHOOK
 # ==================================================
 @app.post("/whatsapp")
-@app.post("/whatsapp/")
 async def whatsapp_webhook(request: Request):
     form = await request.form()
     incoming_msg = form.get("Body", "")
 
-    reply_text = process_user_message(incoming_msg)
+    print("Incoming WhatsApp message:", incoming_msg)
 
-    if not reply_text.strip():
-        reply_text = "Sorry, something went wrong. Please try again."
+    reply_text = process_user_message(incoming_msg)
 
     resp = MessagingResponse()
     resp.message(reply_text)
 
     return Response(
         content=str(resp),
-        media_type="application/xml; charset=utf-8"
+        media_type="application/xml"
     )
-
-# ==================================================
-# HEALTH CHECK
-# ==================================================
-@app.get("/")
-def health():
-    return {"status": "AGPL WhatsApp Bot is running"}
