@@ -10,25 +10,33 @@ app = FastAPI(title="AGPL WhatsApp Assistant")
 # ==================================================
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-ABOUT_TEXT = (BASE_DIR / "about_agpl.txt").read_text(encoding="utf-8")
-SCHEDULE_TEXT = (BASE_DIR / "agpl_2026_schedule.txt").read_text(encoding="utf-8")
-TEAMS_TEXT = (BASE_DIR / "cricket_teams.txt").read_text(encoding="utf-8")
+ABOUT_TEXT = (BASE_DIR / "about_agpl.txt").read_text(encoding="utf-8", errors="ignore")
+SCHEDULE_TEXT = (BASE_DIR / "agpl_2026_schedule.txt").read_text(encoding="utf-8", errors="ignore")
+TEAMS_TEXT = (BASE_DIR / "cricket_teams.txt").read_text(encoding="utf-8", errors="ignore")
 
 # ==================================================
-# SAFE SECTION EXTRACTOR
+# ROBUST SECTION EXTRACTOR ✅ (FIXED)
 # ==================================================
-def extract_section(text, section):
+def extract_section(text, section_name):
+    section_name = section_name.strip().lower()
     lines = text.splitlines()
+
+    collecting = False
     result = []
-    capture = False
 
     for line in lines:
-        if line.strip().upper() == f"[{section.upper()}]":
-            capture = True
-            continue
-        if capture and line.startswith("[") and line.endswith("]"):
-            break
-        if capture:
+        clean = line.strip().lower()
+
+        # start section (flexible match)
+        if clean.startswith("[") and clean.endswith("]"):
+            header = clean.strip("[]").strip()
+            if header == section_name:
+                collecting = True
+                continue
+            elif collecting:
+                break  # next section reached
+
+        if collecting:
             result.append(line)
 
     output = "\n".join(result).strip()
@@ -47,7 +55,7 @@ def load_team_players(text):
             continue
 
         if line.startswith("[") and line.endswith("]"):
-            current_team = line[1:-1]
+            current_team = line.strip("[]").strip()
             teams[current_team] = []
         elif current_team:
             teams[current_team].append(line)
@@ -60,7 +68,6 @@ TEAM_PLAYERS = load_team_players(TEAMS_TEXT)
 # MESSAGE PROCESSOR
 # ==================================================
 def process_user_message(msg):
-    # normalize message
     msg = msg.lower()
     msg = re.sub(r"[^\w\s-]", "", msg)
 
@@ -71,6 +78,7 @@ def process_user_message(msg):
             "Welcome to AGPL–2026 WhatsApp Assistant 🏏\n\n"
             "You can ask:\n"
             "• About AGPL\n"
+            "• Purpose of tournament\n"
             "• Rules / format\n"
             "• Points system\n"
             "• Day 2 matches\n"
@@ -78,43 +86,42 @@ def process_user_message(msg):
             "• Player name"
         )
 
-    # ---------- ABOUT ----------
+    # ---------- ABOUT / RULES / POINTS (FIXED ✅) ----------
     if "about" in msg:
-        return extract_section(ABOUT_TEXT, "ABOUT")
+        return extract_section(ABOUT_TEXT, "about")
 
     if "purpose" in msg:
-        return extract_section(ABOUT_TEXT, "PURPOSE")
+        return extract_section(ABOUT_TEXT, "purpose")
 
     if "rule" in msg or "format" in msg:
-        return extract_section(ABOUT_TEXT, "FORMAT")
+        return extract_section(ABOUT_TEXT, "format")
 
     if "point" in msg:
-        return extract_section(ABOUT_TEXT, "POINTS")
+        return extract_section(ABOUT_TEXT, "points")
 
     if "date" in msg:
-        return extract_section(ABOUT_TEXT, "DATES")
+        return extract_section(ABOUT_TEXT, "dates")
 
     if "team" in msg and "player" not in msg:
-        return extract_section(ABOUT_TEXT, "TEAMS")
+        return extract_section(ABOUT_TEXT, "teams")
 
-    # ---------- DAY MATCHES (SMART FIX) ----------
+    # ---------- DAY MATCHES ----------
     day_match = re.search(r"day\s*[-]?\s*(\d)", msg)
     if day_match:
-        section = f"DAY_{day_match.group(1)}"
-        return extract_section(SCHEDULE_TEXT, section)
+        return extract_section(SCHEDULE_TEXT, f"day {day_match.group(1)}")
 
     # ---------- OTHER SCHEDULE ----------
     if "final" in msg:
-        return extract_section(SCHEDULE_TEXT, "FINAL")
+        return extract_section(SCHEDULE_TEXT, "final match")
 
     if "timing" in msg:
-        return extract_section(SCHEDULE_TEXT, "TIMINGS")
+        return extract_section(SCHEDULE_TEXT, "daily match timings")
 
     if "bowling" in msg and "15" in msg:
-        return extract_section(SCHEDULE_TEXT, "BOWLING_15_OVERS")
+        return extract_section(SCHEDULE_TEXT, "for 15 over match")
 
     if "bowling" in msg and "20" in msg:
-        return extract_section(SCHEDULE_TEXT, "BOWLING_20_OVERS")
+        return extract_section(SCHEDULE_TEXT, "for 20 over match")
 
     # ---------- ALL PLAYERS ----------
     if "all players" in msg or "players list" in msg:
@@ -125,12 +132,6 @@ def process_user_message(msg):
                 output.append(f"• {p}")
             output.append("")
         return "\n".join(output).strip()
-
-    # ---------- PLAYER SEARCH ----------
-    for team, players in TEAM_PLAYERS.items():
-        for player in players:
-            if player.lower() == msg:
-                return f"🏏 Player Details\n\nName: {player}\nTeam: {team}"
 
     # ---------- TEAM PLAYERS ----------
     for team, players in TEAM_PLAYERS.items():
@@ -145,13 +146,14 @@ def process_user_message(msg):
         "Sorry, I couldn’t understand your request ❌\n\n"
         "Try asking:\n"
         "• About AGPL\n"
+        "• Purpose\n"
         "• Rules\n"
-        "• Points system\n"
+        "• Points\n"
         "• Day 2 matches"
     )
 
 # ==================================================
-# WHATSAPP WEBHOOK (SUPPORTS /whatsapp AND /whatsapp/)
+# WHATSAPP WEBHOOK (SAFE & FIXED)
 # ==================================================
 @app.post("/whatsapp")
 @app.post("/whatsapp/")
@@ -159,20 +161,21 @@ async def whatsapp_webhook(request: Request):
     form = await request.form()
     incoming_msg = form.get("Body", "")
 
-    print("Incoming WhatsApp message:", incoming_msg)
-
     reply_text = process_user_message(incoming_msg)
+
+    if not reply_text.strip():
+        reply_text = "Sorry, something went wrong. Please try again."
 
     resp = MessagingResponse()
     resp.message(reply_text)
 
     return Response(
         content=str(resp),
-        media_type="application/xml"
+        media_type="application/xml; charset=utf-8"
     )
 
 # ==================================================
-# OPTIONAL HEALTH CHECK (FOR BROWSER)
+# HEALTH CHECK
 # ==================================================
 @app.get("/")
 def health():
