@@ -1,178 +1,103 @@
-from fastapi import FastAPI, Request, Response
-from twilio.twiml.messaging_response import MessagingResponse
-from pathlib import Path
+from fastapi import FastAPI, Request
+from fastapi.responses import PlainTextResponse
+import requests
+import os
 import re
 
-app = FastAPI(title="AGPL WhatsApp Assistant")
+app = FastAPI(title="AGPL WhatsApp Bot (Meta Cloud API)")
 
 # ==================================================
-# PATHS & FILE LOADING
+# CONFIGURATION
 # ==================================================
-BASE_DIR = Path(__file__).resolve().parent.parent
+VERIFY_TOKEN = "agpl_verify_token_2026"  # must match Meta dashboard
 
-ABOUT_TEXT = (BASE_DIR / "about_agpl.txt").read_text(encoding="utf-8", errors="ignore")
-SCHEDULE_TEXT = (BASE_DIR / "agpl_2026_schedule.txt").read_text(encoding="utf-8", errors="ignore")
-TEAMS_TEXT = (BASE_DIR / "cricket_teams.txt").read_text(encoding="utf-8", errors="ignore")
-
-# ==================================================
-# ROBUST BRACKET SECTION EXTRACTOR (ABOUT FILE)
-# ==================================================
-def extract_about_section(text, section):
-    section = section.lower()
-    lines = text.splitlines()
-    result = []
-    capture = False
-
-    for line in lines:
-        clean = line.strip().lower()
-
-        if clean.startswith("[") and clean.endswith("]"):
-            header = clean.strip("[]")
-            if header == section:
-                capture = True
-                continue
-            elif capture:
-                break
-
-        if capture:
-            result.append(line)
-
-    return "\n".join(result).strip() or "No information available."
+META_TOKEN = os.getenv("META_TOKEN")           # set in Render
+PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID") # set in Render
 
 # ==================================================
-# DAY SCHEDULE EXTRACTOR (FIXED)
+# HEALTH CHECK
 # ==================================================
-def extract_day_schedule(text, day_number):
-    lines = text.splitlines()
-    result = []
-    capture = False
-
-    for line in lines:
-        if re.search(rf"DAY\s+{day_number}\b", line, re.IGNORECASE):
-            capture = True
-            result.append(line)
-            continue
-
-        if capture:
-            if re.search(r"DAY\s+\d+\b", line, re.IGNORECASE):
-                break
-            result.append(line)
-
-    return "\n".join(result).strip() or "No matches scheduled for this day."
+@app.get("/")
+def health():
+    return {"status": "AGPL Meta WhatsApp Bot is running"}
 
 # ==================================================
-# TEAM → PLAYER PARSER
+# WEBHOOK VERIFICATION (META REQUIRES THIS EXACTLY)
 # ==================================================
-def load_team_players(text):
-    teams = {}
-    current_team = None
+@app.get("/webhook")
+def verify_webhook(request: Request):
+    params = request.query_params
 
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
+    mode = params.get("hub.mode")
+    token = params.get("hub.verify_token")
+    challenge = params.get("hub.challenge")
 
-        if line.startswith("[") and line.endswith("]"):
-            current_team = line.strip("[]")
-            teams[current_team] = []
-        elif current_team:
-            teams[current_team].append(line)
+    if mode == "subscribe" and token == VERIFY_TOKEN:
+        # MUST return challenge as plain text
+        return PlainTextResponse(content=challenge)
 
-    return teams
-
-TEAM_PLAYERS = load_team_players(TEAMS_TEXT)
+    return PlainTextResponse(content="Verification failed", status_code=403)
 
 # ==================================================
-# MESSAGE PROCESSOR
+# SEND MESSAGE USING META API
 # ==================================================
-def process_user_message(msg):
-    msg = msg.lower().strip()
-    msg = re.sub(r"[^\w\s-]", "", msg)
+def send_whatsapp_message(to: str, text: str):
+    url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
+    headers = {
+        "Authorization": f"Bearer {META_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": "text",
+        "text": {
+            "body": text
+        }
+    }
 
-    # ---------- GREETINGS ----------
-    if msg in ["hi", "hello", "hey", "good morning", "good evening"]:
-        return (
+    requests.post(url, headers=headers, json=payload)
+
+# ==================================================
+# WEBHOOK RECEIVER (INCOMING MESSAGES)
+# ==================================================
+@app.post("/webhook")
+async def receive_message(request: Request):
+    data = await request.json()
+
+    try:
+        message = data["entry"][0]["changes"][0]["value"]["messages"][0]
+        sender = message["from"]           # user's phone number
+        text = message["text"]["body"]     # message text
+    except Exception:
+        # Ignore non-message events
+        return {"status": "ignored"}
+
+    text_lower = text.lower()
+
+    # ==================================================
+    # BASIC TEST LOGIC (YOU CAN EXPAND LATER)
+    # ==================================================
+    if "hi" in text_lower or "hello" in text_lower:
+        reply = (
             "Hello 👋\n\n"
-            "Welcome to AGPL–2026 WhatsApp Assistant 🏏\n\n"
+            "Welcome to AGPL–2026 WhatsApp Bot 🏏\n\n"
             "You can ask:\n"
             "• About AGPL\n"
-            "• Purpose\n"
-            "• Rules / format\n"
-            "• Points system\n"
-            "• Day 2 matches\n"
-            "• Team players\n"
-            "• Player name"
+            "• Rules\n"
+            "• Points\n"
+            "• Day 2 matches"
         )
+    elif "about" in text_lower:
+        reply = "AGPL–2026 is a village-level tennis ball cricket tournament."
+    elif "rule" in text_lower:
+        reply = "AGPL format: League matches 15 overs, Final 20 overs."
+    elif "point" in text_lower:
+        reply = "Win: 2 points\nLoss: 0 points\nTie: 1 point"
+    elif re.search(r"day\s*2", text_lower):
+        reply = "Day 2 Matches:\n• West vs South – 7:45 AM\n• North vs Palem – 10:45 AM"
+    else:
+        reply = "Sorry, I didn’t understand. Try: about, rules, points, day 2."
 
-    # ---------- ABOUT ----------
-    if "about" in msg:
-        return extract_about_section(ABOUT_TEXT, "about")
-
-    if "purpose" in msg:
-        return extract_about_section(ABOUT_TEXT, "purpose")
-
-    if "rule" in msg or "format" in msg:
-        return extract_about_section(ABOUT_TEXT, "format")
-
-    if "point" in msg:
-        return extract_about_section(ABOUT_TEXT, "points")
-
-    if "date" in msg:
-        return extract_about_section(ABOUT_TEXT, "dates")
-
-    if "team" in msg and "player" not in msg:
-        return extract_about_section(ABOUT_TEXT, "teams")
-
-    # ---------- DAY MATCHES (FIXED ✅) ----------
-    day_match = re.search(r"day\s*[-]?\s*(\d)", msg)
-    if day_match:
-        return extract_day_schedule(SCHEDULE_TEXT, day_match.group(1))
-
-    # ---------- ALL PLAYERS ----------
-    if "all players" in msg or "players list" in msg:
-        output = ["🏏 AGPL Team Players\n"]
-        for team, players in TEAM_PLAYERS.items():
-            output.append(f"{team} Team:")
-            for p in players:
-                output.append(f"• {p}")
-            output.append("")
-        return "\n".join(output).strip()
-
-    # ---------- TEAM PLAYERS ----------
-    for team, players in TEAM_PLAYERS.items():
-        if team.lower() in msg:
-            return "\n".join(
-                [f"🏏 {team} Team Players"] +
-                [f"• {p}" for p in players]
-            )
-
-    # ---------- FALLBACK ----------
-    return (
-        "Sorry, I couldn’t understand your request ❌\n\n"
-        "Try asking:\n"
-        "• About AGPL\n"
-        "• Rules\n"
-        "• Points\n"
-        "• Day 2 matches"
-    )
-
-# ==================================================
-# WHATSAPP WEBHOOK
-# ==================================================
-@app.post("/whatsapp")
-@app.post("/whatsapp/")
-async def whatsapp_webhook(request: Request):
-    form = await request.form()
-    incoming_msg = form.get("Body", "")
-
-    print("Incoming WhatsApp message:", incoming_msg)
-
-    reply_text = process_user_message(incoming_msg)
-
-    resp = MessagingResponse()
-    resp.message(reply_text)
-
-    return Response(
-        content=str(resp),
-        media_type="application/xml; charset=utf-8"
-    )
+    send_whatsapp_message(sender, reply)
+    return {"status": "ok"}
