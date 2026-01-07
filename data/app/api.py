@@ -2,61 +2,16 @@ from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 from twilio.twiml.messaging_response import MessagingResponse
 from pathlib import Path
+import json
 import re
 
-app = FastAPI(title="AGPL WhatsApp Bot (Twilio)")
+app = FastAPI(title="AGPL WhatsApp Bot")
 
 # ==================================================
-# LOAD DATA FILES
+# LOAD SINGLE DATA FILE
 # ==================================================
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-ABOUT_TEXT = (BASE_DIR / "about_agpl.txt").read_text(encoding="utf-8")
-SCHEDULE_TEXT = (BASE_DIR / "agpl_2026_schedule.txt").read_text(encoding="utf-8")
-TEAMS_TEXT = (BASE_DIR / "cricket_teams.txt").read_text(encoding="utf-8")
-
-# ==================================================
-# TEAM → PLAYER PARSER
-# ==================================================
-def load_team_players(text):
-    teams = {}
-    current_team = None
-
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        if line.startswith("[") and line.endswith("]"):
-            current_team = line.strip("[]")
-            teams[current_team] = []
-        elif current_team:
-            teams[current_team].append(line)
-
-    return teams
-
-TEAM_PLAYERS = load_team_players(TEAMS_TEXT)
-
-# ==================================================
-# FLEXIBLE SECTION EXTRACTOR (FIXED)
-# ==================================================
-def extract_between(text, start_keywords, stop_keywords):
-    collecting = False
-    result = []
-
-    for line in text.splitlines():
-        lower = line.lower()
-
-        if any(k in lower for k in start_keywords):
-            collecting = True
-            continue
-
-        if collecting and any(k in lower for k in stop_keywords):
-            break
-
-        if collecting:
-            result.append(line)
-
-    return "\n".join(result).strip()
+DATA = json.loads((BASE_DIR / "agpl_data.json").read_text(encoding="utf-8"))
 
 # ==================================================
 # MESSAGE LOGIC
@@ -67,46 +22,47 @@ def process_message(msg: str):
     if msg in ["hi", "hello", "hey"]:
         return (
             "Hello 👋\n\n"
-            "Welcome to AGPL–2026 WhatsApp Bot 🏏\n\n"
-            "Ask me:\n"
+            "AGPL–2026 WhatsApp Bot 🏏\n\n"
+            "Ask:\n"
             "• About AGPL\n"
-            "• Rules / Format\n"
-            "• Points system\n"
+            "• Purpose\n"
+            "• Rules\n"
+            "• Points\n"
             "• Day 2 matches\n"
-            "• Team players"
+            "• West team players"
         )
 
-    # ABOUT FILE
     if "about" in msg:
-        return extract_between(ABOUT_TEXT, ["about"], ["purpose"])
+        return DATA["about"]["description"]
 
     if "purpose" in msg:
-        return extract_between(ABOUT_TEXT, ["purpose"], ["format"])
+        return "Purpose:\n" + "\n".join(f"• {p}" for p in DATA["about"]["purpose"])
 
     if "rule" in msg or "format" in msg:
-        return extract_between(ABOUT_TEXT, ["format"], ["dates"])
-
-    if "point" in msg:
-        return extract_between(ABOUT_TEXT, ["points"], [""])
-
-    if "date" in msg:
-        return extract_between(ABOUT_TEXT, ["dates"], ["teams"])
-
-    if "teams" in msg:
-        return extract_between(ABOUT_TEXT, ["teams"], ["points"])
-
-    # DAY MATCHES (WORKS WITH YOUR FILE)
-    day_match = re.search(r"day\s*-?\s*(\d)", msg)
-    if day_match:
-        day = day_match.group(1)
-        return extract_between(
-            SCHEDULE_TEXT,
-            [f"day {day}"],
-            [f"day {int(day)+1}", "final"]
+        f = DATA["about"]["format"]
+        return (
+            f"Format: {f['type']}\n"
+            f"League: {f['league_overs']} overs\n"
+            f"Final: {f['final_overs']} overs"
         )
 
-    # TEAM PLAYERS
-    for team, players in TEAM_PLAYERS.items():
+    if "point" in msg:
+        p = DATA["about"]["points"]
+        return f"Points:\nWin – {p['win']}\nLoss – {p['loss']}\nTie – {p['tie']}"
+
+    day_match = re.search(r"day\s*(\d)", msg)
+    if day_match:
+        day = f"day{day_match.group(1)}"
+        matches = DATA["schedule"].get(day)
+        if matches:
+            return "\n".join(
+                [f"🏏 {m['match']} at {m['time']}" for m in matches]
+            )
+
+    if "final" in msg:
+        return DATA["schedule"]["final"]
+
+    for team, players in DATA["teams"].items():
         if team.lower() in msg:
             return "\n".join(
                 [f"🏏 {team} Team Players"] +
@@ -117,7 +73,6 @@ def process_message(msg: str):
         "Sorry ❌ I didn’t understand.\n\n"
         "Try:\n"
         "• About AGPL\n"
-        "• Rules\n"
         "• Day 2 matches\n"
         "• West team players"
     )
@@ -131,21 +86,13 @@ async def whatsapp_webhook(request: Request):
     form = await request.form()
     incoming_msg = form.get("Body", "")
 
-    print("Incoming WhatsApp message:", incoming_msg)
-
-    reply_text = process_message(incoming_msg)
+    reply = process_message(incoming_msg)
 
     resp = MessagingResponse()
-    resp.message(reply_text)
+    resp.message(reply)
 
-    return PlainTextResponse(
-        content=str(resp),
-        media_type="application/xml"
-    )
+    return PlainTextResponse(str(resp), media_type="application/xml")
 
-# ==================================================
-# HEALTH CHECK
-# ==================================================
 @app.get("/")
 def health():
-    return {"status": "AGPL Twilio WhatsApp Bot running"}
+    return {"status": "AGPL WhatsApp Bot running"}
