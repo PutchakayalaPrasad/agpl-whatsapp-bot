@@ -26,7 +26,6 @@ def load_team_players(text):
         line = line.strip()
         if not line:
             continue
-
         if line.startswith("[") and line.endswith("]"):
             current_team = line.strip("[]")
             teams[current_team] = []
@@ -38,19 +37,23 @@ def load_team_players(text):
 TEAM_PLAYERS = load_team_players(TEAMS_TEXT)
 
 # ==================================================
-# SECTION EXTRACTOR
+# FLEXIBLE SECTION EXTRACTOR (FIXED)
 # ==================================================
-def extract_section(text, section):
-    capture = False
+def extract_between(text, start_keywords, stop_keywords):
+    collecting = False
     result = []
 
     for line in text.splitlines():
-        if line.strip().lower() == f"[{section.lower()}]":
-            capture = True
+        lower = line.lower()
+
+        if any(k in lower for k in start_keywords):
+            collecting = True
             continue
-        if capture and line.startswith("["):
+
+        if collecting and any(k in lower for k in stop_keywords):
             break
-        if capture:
+
+        if collecting:
             result.append(line)
 
     return "\n".join(result).strip()
@@ -73,33 +76,36 @@ def process_message(msg: str):
             "• Team players"
         )
 
+    # ABOUT FILE
     if "about" in msg:
-        return extract_section(ABOUT_TEXT, "ABOUT")
+        return extract_between(ABOUT_TEXT, ["about"], ["purpose"])
 
     if "purpose" in msg:
-        return extract_section(ABOUT_TEXT, "PURPOSE")
+        return extract_between(ABOUT_TEXT, ["purpose"], ["format"])
 
     if "rule" in msg or "format" in msg:
-        return extract_section(ABOUT_TEXT, "FORMAT")
+        return extract_between(ABOUT_TEXT, ["format"], ["dates"])
 
     if "point" in msg:
-        return extract_section(ABOUT_TEXT, "POINTS")
+        return extract_between(ABOUT_TEXT, ["points"], [""])
 
     if "date" in msg:
-        return extract_section(ABOUT_TEXT, "DATES")
+        return extract_between(ABOUT_TEXT, ["dates"], ["teams"])
 
-    if "team" in msg and "player" not in msg:
-        return extract_section(ABOUT_TEXT, "TEAMS")
+    if "teams" in msg:
+        return extract_between(ABOUT_TEXT, ["teams"], ["points"])
 
-    # Day matches (Day 1 / Day2 / Day-2)
-    match = re.search(r"day\s*-?\s*(\d)", msg)
-    if match:
-        day = match.group(1)
-        result = extract_section(SCHEDULE_TEXT, f"DAY {day}")
-        if result:
-            return result
+    # DAY MATCHES (WORKS WITH YOUR FILE)
+    day_match = re.search(r"day\s*-?\s*(\d)", msg)
+    if day_match:
+        day = day_match.group(1)
+        return extract_between(
+            SCHEDULE_TEXT,
+            [f"day {day}"],
+            [f"day {int(day)+1}", "final"]
+        )
 
-    # Team players
+    # TEAM PLAYERS
     for team, players in TEAM_PLAYERS.items():
         if team.lower() in msg:
             return "\n".join(
@@ -111,12 +117,13 @@ def process_message(msg: str):
         "Sorry ❌ I didn’t understand.\n\n"
         "Try:\n"
         "• About AGPL\n"
+        "• Rules\n"
         "• Day 2 matches\n"
         "• West team players"
     )
 
 # ==================================================
-# TWILIO WHATSAPP WEBHOOK
+# TWILIO WEBHOOK
 # ==================================================
 @app.post("/whatsapp")
 @app.post("/whatsapp/")
