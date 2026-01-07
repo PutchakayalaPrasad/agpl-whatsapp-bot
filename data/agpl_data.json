@@ -1,0 +1,53 @@
+{
+  "about": {
+    "description": "AGPL–2026 is a village-level tennis ball cricket tournament organized to promote sportsmanship, unity, and healthy competition among local youth.",
+    "purpose": [
+      "Encourage cricket talent in the village",
+      "Promote teamwork and discipline",
+      "Build leadership among youth",
+      "Bring the community together"
+    ],
+    "format": {
+      "league_overs": 15,
+      "final_overs": 20,
+      "type": "Round Robin League"
+    },
+    "dates": "12 January 2026 to 15 January 2026",
+    "points": {
+      "win": 2,
+      "loss": 0,
+      "tie": 1
+    },
+    "teams": ["East", "West", "North", "South", "Palem"]
+  },
+
+  "schedule": {
+    "day1": [
+      {"time": "7:45 AM", "match": "West vs North"},
+      {"time": "10:45 AM", "match": "South vs Palem"},
+      {"time": "2:45 PM", "match": "East vs North"}
+    ],
+    "day2": [
+      {"time": "7:45 AM", "match": "West vs South"},
+      {"time": "10:45 AM", "match": "North vs Palem"},
+      {"time": "2:45 PM", "match": "East vs South"}
+    ],
+    "day3": [
+      {"time": "7:45 AM", "match": "East vs West"},
+      {"time": "10:45 AM", "match": "North vs South"},
+      {"time": "2:45 PM", "match": "Palem vs East"}
+    ],
+    "day4": [
+      {"time": "7:45 AM", "match": "West vs Palem"}
+    ],
+    "final": "Top 1 vs Top 2 (20 overs)"
+  },
+
+  "teams": {
+    "East": ["Prasad", "Venkat", "Nagesh", "Vadlamudi", "Chowdary"],
+    "South": ["Player1", "Player2", "Player3", "Player4", "Player5"],
+    "North": ["North1", "North2", "North3", "North4", "North5"],
+    "West": ["Srinu", "Peraiah", "Sai", "Shiva", "Venkatesh"],
+    "Palem": ["Palem1", "Palem2", "Palem3", "Palem4", "Palem5"]
+  }
+}
